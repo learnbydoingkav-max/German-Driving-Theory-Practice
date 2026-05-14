@@ -167,15 +167,17 @@ with st.container(border=True):
 
 # --- Options Box ---
 with st.container(border=True, height=220):
+    answer_keys = [""] + list(q["options"].keys())
     choice = st.radio(
         "Select your answer:",
-        list(q["options"].keys()),
-        format_func=lambda l: f"{l}. {q['options'][l]}",
+        answer_keys,
+        format_func=lambda l: "Select an answer" if l == "" else f"{l}. {q['options'][l]}",
         key=f"radio_{qid}",
         disabled=is_revealed,
         label_visibility="collapsed",
     )
-    st.session_state.answers[qid] = choice
+    selected_answer = None if choice == "" else choice
+    st.session_state.answers[qid] = selected_answer
 
 # --- Navigation Buttons ---
 with st.container(border=True, height=80):
@@ -186,8 +188,11 @@ with st.container(border=True, height=80):
             st.rerun()
     with col2:
         if st.button("✅ Submit", use_container_width=True, disabled=is_revealed):
-            st.session_state.revealed[qid] = True
-            st.rerun()
+            if st.session_state.answers.get(qid) is None:
+                st.warning("Please select an answer before submitting.")
+            else:
+                st.session_state.revealed[qid] = True
+                st.rerun()
     with col3:
         if st.button("Next ➡", use_container_width=True):
             st.session_state.current_q = idx + 1
