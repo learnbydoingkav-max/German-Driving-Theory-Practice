@@ -1,6 +1,7 @@
 import streamlit as st
 from openai import OpenAI
 import json
+import requests
 
 st.set_page_config(page_title="German Driving Theory Practice", page_icon="🚗", layout="centered")
 st.title("🚗 German Driving Theory – MCQ Practice (AI-Powered)")
@@ -8,12 +9,81 @@ st.title("🚗 German Driving Theory – MCQ Practice (AI-Powered)")
 # --- OpenRouter Client ---
 @st.cache_resource
 def get_client():
+    if "OPENROUTER_API_KEY" not in st.secrets:
+        st.error(
+            "Missing OPENROUTER_API_KEY in Streamlit secrets. "
+            "Set it in Streamlit Cloud under App Settings > Secrets."
+        )
+        st.stop()
     return OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=st.secrets["OPENROUTER_API_KEY"],
     )
 
-# --- Generate a situation-based question with a real image URL ---
+# --- Search Wikimedia Commons for an image ---
+def search_wikimedia_image(keywords: str):
+    search_url = "https://commons.wikimedia.org/w/api.php"
+    headers = {
+        "User-Agent": "GermanDrivingTheoryPractice/1.0 (https://github.com/learnbydoingkav-max)",
+    }
+    if not keywords:
+        return None
+
+    base_keywords = keywords.strip()
+    if "germany" not in base_keywords.lower():
+        base_keywords += " Germany"
+
+    search_variants = [
+        base_keywords,
+        base_keywords + " filetype:svg",
+        base_keywords + " filetype:jpg",
+        base_keywords + " filetype:png",
+        base_keywords + " filetype:webp",
+    ]
+    valid_mimes = {
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/gif",
+        "image/svg+xml",
+        "image/webp",
+        "image/bmp",
+        "image/tiff",
+    }
+
+    try:
+        for query in search_variants:
+            params = {
+                "action": "query",
+                "format": "json",
+                "formatversion": 2,
+                "generator": "search",
+                "gsrsearch": query,
+                "gsrnamespace": 6,
+                "gsrlimit": 20,
+                "prop": "imageinfo",
+                "iiprop": "url|mime",
+            }
+            response = requests.get(search_url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            try:
+                data = response.json()
+            except ValueError:
+                st.warning(f"Wikimedia search returned invalid JSON: {response.text[:200]}")
+                continue
+
+            pages = data.get("query", {}).get("pages", [])
+            for page in pages:
+                for imageinfo in page.get("imageinfo", []) or []:
+                    mime = imageinfo.get("mime", "")
+                    if mime in valid_mimes:
+                        return imageinfo.get("url")
+        return None
+    except requests.RequestException as e:
+        st.warning(f"Failed to search Wikimedia: {e}")
+        return None
+
+# --- Generate a situation-based question with image keywords ---
 @st.cache_data(ttl=3600)
 def generate_question(topic: str, q_index: int):
     client = get_client()
@@ -21,14 +91,12 @@ def generate_question(topic: str, q_index: int):
 
 The question should describe a real driving scenario a learner driver in Germany might face.
 
-For the image_url field, provide a real, publicly accessible image URL from Wikimedia Commons 
-(https://upload.wikimedia.org/wikipedia/commons/...) that shows a relevant German traffic sign or road situation.
-Only use URLs you are confident exist. If unsure, set image_url to null.
+Provide image_keywords as a string of search terms (e.g., "stop sign traffic light") that can be used to find a relevant image on Wikimedia Commons.
 
 Return ONLY valid JSON in this exact format:
 {{
   "question": "You are driving and see this sign. What must you do?",
-  "image_url": "https://upload.wikimedia.org/wikipedia/commons/...",
+  "image_keywords": "stop sign Germany",
   "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
   "correct": "A",
   "explanation": "..."
@@ -40,10 +108,20 @@ Return ONLY valid JSON in this exact format:
     )
     raw = completion.choices[0].message.content
     try:
-        return json.loads(raw)
+        q = json.loads(raw)
     except json.JSONDecodeError:
         st.error(f"Failed to decode JSON from AI response: {raw}")
         st.stop()
+    
+    # Search for image using keywords
+    keywords = q.get("image_keywords", "")
+    if keywords:
+        image_url = search_wikimedia_image(keywords)
+        q["image_url"] = image_url
+    else:
+        q["image_url"] = None
+    
+    return q
 
 # --- Session State ---
 st.session_state.setdefault("current_q", 0)

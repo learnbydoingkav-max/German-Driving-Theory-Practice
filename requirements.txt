@@ -6,4 +6,8 @@ langchain-openai
 langchain-google-genai
 # Streamlit - web application framework for building interactive data/AI apps
 streamlit
+# OpenAI Python client for OpenRouter/OpenAI SDK access
+openai
+# Requests - HTTP library for API calls
+requests
 
