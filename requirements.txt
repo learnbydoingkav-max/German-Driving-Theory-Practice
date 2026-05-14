@@ -1,0 +1,9 @@
+# LangChain - core framework for LLM orchestration, prompt templates, and chaining
+langchain
+# LangChain OpenAI integration - provides OpenAI model wrappers for LangChain
+langchain-openai
+# LangChain Google GenAI integration - provides Google Gemini model wrappers for LangChain
+langchain-google-genai
+# Streamlit - web application framework for building interactive data/AI apps
+streamlit
+
