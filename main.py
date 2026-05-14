@@ -1,58 +1,110 @@
-# ============================================================
-# Tweet Generator - Main Application
-# A Streamlit app that generates tweets using Google's Gemini
-# AI model, orchestrated through LangChain.
-# ============================================================
-
-# --- Imports ---
-# LangChain components for LLM interaction and prompt management
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain import LLMChain
-from langchain import PromptTemplate
-
-# Streamlit for the web UI, os for environment variable management
 import streamlit as st
-import os
+from openai import OpenAI
+import json
 
-# --- API Key Configuration ---
-# Load the Google API key from Streamlit's secrets manager
-# and set it as an environment variable for the Google GenAI client.
-# The key should be defined in .streamlit/secrets.toml
-os.environ['GOOGLE_API_KEY'] = st.secrets['GOOGLE_API_KEY']
+st.set_page_config(page_title="German Driving Theory Practice", page_icon="🚗", layout="centered")
+st.title("🚗 German Driving Theory – MCQ Practice (AI-Powered)")
 
-# --- Prompt Template ---
-# Define the prompt template with placeholders for the number of tweets
-# and the topic. LangChain's PromptTemplate handles variable substitution.
-tweet_template = "Give me {number} tweets on {topic}"
+# --- OpenRouter Client using st.secrets ---
+@st.cache_resource
+def get_client():
+    return OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=st.secrets["OPENROUTER_API_KEY"],
+    )
 
-tweet_prompt = PromptTemplate(template = tweet_template, input_variables = ['number', 'topic'])
+# --- Generate a question via OpenRouter ---
+@st.cache_data(ttl=3600)
+def generate_question(topic: str, q_index: int):
+    client = get_client()
+    prompt = f"""Generate a multiple-choice question about German driving regulations on the topic: "{topic}".
+Return ONLY valid JSON in this exact format:
+{{
+  "question": "...",
+  "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
+  "correct": "A",
+  "explanation": "..."
+}}"""
+    completion = client.chat.completions.create(
+        model="openai/gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        stream=False,
+    )
+    raw = completion.choices[0].message.content
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        st.error(f"Failed to decode JSON from AI response: {raw}")
+        st.stop()
 
-# --- Model Initialization ---
-# Initialize Google's Gemini 1.5 Flash model via LangChain's
-# ChatGoogleGenerativeAI wrapper. Flash is optimized for speed and efficiency.
-gemini_model = ChatGoogleGenerativeAI(model = "gemini-1.5-flash-latest")
+# --- Session State ---
+st.session_state.setdefault("current_q", 0)
+st.session_state.setdefault("answers", {})
+st.session_state.setdefault("revealed", {})
 
-# --- LangChain Pipeline ---
-# Chain the prompt template and model together using LangChain's pipe operator.
-# When invoked, the prompt is formatted first, then passed to the model.
-tweet_chain = tweet_prompt | gemini_model
+# --- Topics (update when regulations change) ---
+TOPICS = [
+    "traffic signs",
+    "right of way rules",
+    "speed limits",
+    "motorway (Autobahn) rules",
+    "parking regulations",
+]
 
-# --- Streamlit UI ---
-# Page header and description
-import streamlit as st
+idx = st.session_state.current_q
+topic = TOPICS[idx % len(TOPICS)]
 
-st.header("🐦 Tweet Generator")
+# --- Load question ---
+with st.spinner("Loading question..."):
+    try:
+        q = generate_question(topic, idx)
+    except Exception as e:
+        st.error(f"Failed to generate question: {e}")
+        st.stop()
 
-st.subheader("Generate tweets using Generative AI 🤖")
+qid = f"q_{idx}"
+is_revealed = st.session_state.revealed.get(qid, False)
 
-# Text input for the user to specify a tweet topic
-topic = st.text_input("Topic")
+# --- Question Box ---
+with st.container(border=True, height=120):
+    st.markdown(f"**Q{idx + 1} | Topic: {topic.title()}**\n\n{q['question']}")
 
-# Numeric input to select how many tweets to generate (between 1 and 10)
-number = st.number_input("Number of tweets", min_value = 1, max_value = 10, value = 1, step = 1)
+# --- Options Box ---
+with st.container(border=True, height=220):
+    choice = st.radio(
+        "Select your answer:",
+        list(q["options"].keys()),
+        format_func=lambda l: f"{l}. {q['options'][l]}",
+        key=f"radio_{qid}",
+        disabled=is_revealed,
+        label_visibility="collapsed",
+    )
+    st.session_state.answers[qid] = choice
 
-# Generate button - invokes the LangChain pipeline and displays the results
-if st.button("Generate"):
-    tweets = tweet_chain.invoke({"number" : number, "topic" : topic})
-    st.write(tweets.content)
-    
+# --- Navigation Buttons ---
+with st.container(border=True, height=80):
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("⬅ Previous", use_container_width=True, disabled=(idx == 0)):
+            st.session_state.current_q = max(0, idx - 1)
+            st.rerun()
+    with col2:
+        if st.button("✅ Submit", use_container_width=True, disabled=is_revealed):
+            st.session_state.revealed[qid] = True
+            st.rerun()
+    with col3:
+        if st.button("Next ➡", use_container_width=True):
+            st.session_state.current_q = idx + 1
+            st.rerun()
+
+# --- Answer/Explanation Box ---
+with st.container(border=True, height=130):
+    if is_revealed:
+        user_ans = st.session_state.answers.get(qid)
+        if user_ans == q["correct"]:
+            st.success(f"✅ Correct! Answer: {q['correct']}")
+        else:
+            st.error(f"❌ Incorrect. Correct: {q['correct']} | Your answer: {user_ans or '—'}")
+        st.info(q.get("explanation", ""))
+    else:
+        st.caption("Submit your answer to see the explanation.")
