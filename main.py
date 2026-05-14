@@ -5,7 +5,7 @@ import json
 st.set_page_config(page_title="German Driving Theory Practice", page_icon="🚗", layout="centered")
 st.title("🚗 German Driving Theory – MCQ Practice (AI-Powered)")
 
-# --- OpenRouter Client using st.secrets ---
+# --- OpenRouter Client ---
 @st.cache_resource
 def get_client():
     return OpenAI(
@@ -13,14 +13,17 @@ def get_client():
         api_key=st.secrets["OPENROUTER_API_KEY"],
     )
 
-# --- Generate a question via OpenRouter ---
+# --- Generate a situation-based question with an image URL ---
 @st.cache_data(ttl=3600)
 def generate_question(topic: str, q_index: int):
     client = get_client()
-    prompt = f"""Generate a multiple-choice question about German driving regulations on the topic: "{topic}".
+    prompt = f"""Generate a situation-based multiple-choice question about German driving regulations on the topic: "{topic}".
+The question should describe a real driving scenario.
+Also provide a relevant, publicly accessible image URL (e.g. from Wikimedia Commons or a traffic sign resource) that illustrates the situation.
 Return ONLY valid JSON in this exact format:
 {{
-  "question": "...",
+  "question": "You are driving on a road and see this sign. What must you do?",
+  "image_url": "https://upload.wikimedia.org/wikipedia/commons/...",
   "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
   "correct": "A",
   "explanation": "..."
@@ -42,7 +45,7 @@ st.session_state.setdefault("current_q", 0)
 st.session_state.setdefault("answers", {})
 st.session_state.setdefault("revealed", {})
 
-# --- Topics (update when regulations change) ---
+# --- Topics ---
 TOPICS = [
     "traffic signs",
     "right of way rules",
@@ -66,8 +69,15 @@ qid = f"q_{idx}"
 is_revealed = st.session_state.revealed.get(qid, False)
 
 # --- Question Box ---
-with st.container(border=True, height=120):
-    st.markdown(f"**Q{idx + 1} | Topic: {topic.title()}**\n\n{q['question']}")
+with st.container(border=True):
+    st.markdown(f"**Q{idx + 1} | Topic: {topic.title()}**")
+
+    # Display situation image if provided
+    image_url = q.get("image_url")
+    if image_url:
+        st.image(image_url, caption="Situation Image", width=300)
+
+    st.markdown(q["question"])
 
 # --- Options Box ---
 with st.container(border=True, height=220):
