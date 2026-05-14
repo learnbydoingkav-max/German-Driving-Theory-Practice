@@ -13,16 +13,21 @@ def get_client():
         api_key=st.secrets["OPENROUTER_API_KEY"],
     )
 
-# --- Generate a situation-based question with an image URL ---
+# --- Generate a situation-based question with a real image URL ---
 @st.cache_data(ttl=3600)
 def generate_question(topic: str, q_index: int):
     client = get_client()
     prompt = f"""Generate a situation-based multiple-choice question about German driving regulations on the topic: "{topic}".
-The question should describe a real driving scenario.
-Also provide a relevant, publicly accessible image URL (e.g. from Wikimedia Commons or a traffic sign resource) that illustrates the situation.
+
+The question should describe a real driving scenario a learner driver in Germany might face.
+
+For the image_url field, provide a real, publicly accessible image URL from Wikimedia Commons 
+(https://upload.wikimedia.org/wikipedia/commons/...) that shows a relevant German traffic sign or road situation.
+Only use URLs you are confident exist. If unsure, set image_url to null.
+
 Return ONLY valid JSON in this exact format:
 {{
-  "question": "You are driving on a road and see this sign. What must you do?",
+  "question": "You are driving and see this sign. What must you do?",
   "image_url": "https://upload.wikimedia.org/wikipedia/commons/...",
   "options": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
   "correct": "A",
@@ -75,7 +80,10 @@ with st.container(border=True):
     # Display situation image if provided
     image_url = q.get("image_url")
     if image_url:
-        st.image(image_url, caption="Situation Image", width=300)
+        try:
+            st.image(image_url, caption="Situation", width=300)
+        except Exception:
+            st.caption("_(Image could not be loaded)_")
 
     st.markdown(q["question"])
 
